@@ -1,0 +1,51 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull + recréation des services
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          export IMAGE_TAG="${HEAD_SHA::7}"
+          docker compose pull frontend backend
+          docker compose up -d --remove-orphans
+          docker image prune -f
+
+      - name: État des conteneurs
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+        run: docker compose ps --format 'table {{.Name}}\t{{.Image}}\t{{.Status}}'
+
+      - name: Smoke test
+        run: |
+          curl -fsS --retry 15 --retry-delay 4 --retry-connrefused http://localhost:4200/ > /dev/null
+          curl -fsS --retry 15 --retry-delay 4 --retry-connrefused http://localhost:8081/user/all > /dev/null
