@@ -1,35 +1,41 @@
-version: "3.3"
+name: fullstack-app
+
 services:
-  angular-app:
-    image: nouran10/angular
-    ports:
-      - "0.0.0.0:4200:80"      
-  spring-boot-app:
-    image: nouran10/spring
-    ports:
-      - "0.0.0.0:8081:8081"
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/demo
-      - SPRING_DATASOURCE_USERNAME=root
-      - SPRING_DATASOURCE_PASSWORD=root
-      - spring.jpa.database-platform=org.hibernate.dialect.MySQL8Dialect
-      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=com.mysql.cj.jdbc.Driver
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
-      - SPRING_MVC_CORS_MAPPING=/**
-      - SPRING_MVC_CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE
-      - SPRING_MVC_CORS_ALLOWED_HEADERS=*
-    depends_on:
-      - mysql
   mysql:
-    image: mysql:5.7
-    restart: always
+    image: mysql:8.0
+    restart: unless-stopped
     environment:
-      MYSQL_DATABASE: 'demo'
-      MYSQL_ROOT_USERNAME: 'root'
-      MYSQL_ROOT_PASSWORD: 'root'
-    ports:
-      - '0.0.0.0:3306:3306'
+      MYSQL_DATABASE: demo
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?définir MYSQL_ROOT_PASSWORD}
     volumes:
-      - demo:/var/lib/mysql
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: ${DOCKERHUB_USERNAME:?définir DOCKERHUB_USERNAME}/fullstack-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/demo
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  frontend:
+    image: ${DOCKERHUB_USERNAME}/fullstack-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "4200:80"
+    depends_on:
+      - backend
+
 volumes:
-  demo:
+  mysql-data:
