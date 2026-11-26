@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend (Maven)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: Maven verify
+        run: mvn -B verify
+        working-directory: springboot/app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: springboot/app/target/*.jar
+          retention-days: 1
+
+  frontend:
+    name: frontend (npm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - name: Install dependencies
+        run: npm install --force
+        working-directory: angular-app
+      - name: Build Angular
+        run: npm run build
+        working-directory: angular-app
+
+  publish:
+    name: publish (Docker Hub)
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: springboot/app/target
+      - name: SHA court du commit
+        id: vars
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build & push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: springboot/app
+          push: true
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/fullstack-backend:${{ steps.vars.outputs.sha }}
+            ${{ vars.DOCKERHUB_USERNAME }}/fullstack-backend:latest
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: angular-app
+          push: true
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/fullstack-frontend:${{ steps.vars.outputs.sha }}
+            ${{ vars.DOCKERHUB_USERNAME }}/fullstack-frontend:latest
